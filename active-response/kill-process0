@@ -1,0 +1,44 @@
+#!/usr/bin/env python3
+import json
+import subprocess
+import sys
+from datetime import datetime
+
+LOG = "/var/ossec/logs/kill-process.log"
+
+def log(msg):
+    with open(LOG, "a") as f:
+        f.write(f"{datetime.now().isoformat()} {msg}\n")
+
+try:
+    line = sys.stdin.readline()
+    data = json.loads(line)
+
+    if data.get("command") != "add":
+        sys.exit(0)
+
+    alert = data.get("parameters", {}).get("alert", {})
+    event_data = alert.get("data", {})
+
+    process_name = event_data.get("process_name") or event_data.get("processname")
+
+    if not process_name:
+        log("ERROR: process_name not found")
+        sys.exit(1)
+
+    result = subprocess.run(
+        ["pkill", "-TERM", "-x", process_name],
+        capture_output=True,
+        text=True
+    )
+
+    if result.returncode == 0:
+        log(f"KILLED process_name={process_name}")
+        sys.exit(0)
+
+    log(f"NOT_FOUND process_name={process_name}")
+    sys.exit(1)
+
+except Exception as e:
+    log(f"ERROR: {e}")
+    sys.exit(1)
