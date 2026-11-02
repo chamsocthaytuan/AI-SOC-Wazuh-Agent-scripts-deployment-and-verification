@@ -8,21 +8,26 @@ DEST="/var/ossec/active-response/bin"
 EVIDENCE="/var/ossec/logs/ai-soc-verification.json"
 STATE="/var/lib/ai-soc-isolation/active_execution"
 
-case "${1:---dry-run}" in
-  --dry-run) MODE="preview" ;;
-  --apply) MODE="apply" ;;
-  *) printf 'Usage: bash scripts/install.sh [--dry-run|--apply]\n' >&2; exit 2 ;;
-esac
+MODE="preview"
+WITH_KILL_PROCESS=0
+for arg in "$@"; do
+  case "$arg" in
+    --dry-run) MODE="preview" ;;
+    --apply) MODE="apply" ;;
+    --with-kill-process) WITH_KILL_PROCESS=1 ;;
+    *) printf 'Usage: bash scripts/install.sh [--dry-run|--apply] [--with-kill-process]\n' >&2; exit 2 ;;
+  esac
+done
 
 command -v bash >/dev/null && command -v python3 >/dev/null || {
   echo "Requires bash and Python 3" >&2
   exit 1
 }
-for f in block-ip.py isolate.sh ai_soc_evidence.py kill-process0; do
+for f in block-ip.py isolate.sh ai_soc_evidence.py kill-process0 kill-process-safe.py; do
   [[ -f "$ROOT/active-response/$f" ]] || { echo "Missing source $f" >&2; exit 1; }
 done
 bash -n "$ROOT/active-response/isolate.sh"
-python3 - "$ROOT/active-response/block-ip.py" "$ROOT/active-response/ai_soc_evidence.py" "$ROOT/active-response/kill-process0" <<'PY'
+python3 - "$ROOT/active-response/block-ip.py" "$ROOT/active-response/ai_soc_evidence.py" "$ROOT/active-response/kill-process0" "$ROOT/active-response/kill-process-safe.py" <<'PY'
 import pathlib,sys
 for name in sys.argv[1:]:
     compile(pathlib.Path(name).read_bytes(),name,"exec")
@@ -32,7 +37,11 @@ echo "Mode: $MODE"
 echo "Source: $ROOT/active-response"
 echo "Destination: $DEST"
 echo "Evidence file: $EVIDENCE"
-echo "Legacy kill-process0: bundled for review but intentionally NOT installed (security hardening pending)"
+if [[ "$WITH_KILL_PROCESS" == 1 ]]; then
+  echo "Kill Process: opt-in hardened script selected; requires a root-owned nonempty allowlist"
+else
+  echo "Kill Process: legacy source archived, not installed (use --with-kill-process)"
+fi
 
 if [[ "$MODE" != "apply" ]]; then
   echo "No changes made. Use --apply only on an authorized Wazuh Agent."
@@ -74,6 +83,13 @@ if not match or actual != [(match.group(1),"1514","tcp")]:
     raise SystemExit("Manager IP/protocol mismatch: review isolate.sh defaults before --apply")
 PY
 
+# Never replace a live kill-process0 with legacy code. The operator must
+# explicitly choose the hardened variant and provision a strict policy first.
+if [[ "$WITH_KILL_PROCESS" == 1 ]]; then
+  python3 -c 'import os, signal; assert hasattr(os, "pidfd_open") and hasattr(signal, "pidfd_send_signal"), "Kernel/Python PIDFD support required"'
+  python3 "$ROOT/active-response/kill-process-safe.py" --check-policy
+fi
+
 if [[ -e "$EVIDENCE" ]]; then
   [[ -f "$EVIDENCE" && "$(stat -c '%u:%G:%a' "$EVIDENCE")" == "0:wazuh:640" ]] || {
     echo "Existing evidence ledger ownership/mode is unsafe; refusing to modify" >&2
@@ -96,4 +112,16 @@ for f in block-ip.py isolate.sh ai_soc_evidence.py; do
   mv -f -- "$tmp" "$dest"
   echo "Installed: $dest"
 done
+if [[ "$WITH_KILL_PROCESS" == 1 ]]; then
+  dest="$DEST/kill-process0"
+  tmp="$DEST/.kill-process0.install-$stamp"
+  [[ ! -L "$dest" ]] || { echo "Refusing destination symlink: $dest" >&2; exit 1; }
+  if [[ -e "$dest" ]]; then
+    cp -a -- "$dest" "$dest.bak-$stamp"
+    echo "Backup: $dest.bak-$stamp"
+  fi
+  install -o root -g wazuh -m 0750 "$ROOT/active-response/kill-process-safe.py" "$tmp"
+  mv -f -- "$tmp" "$dest"
+  echo "Installed hardened Kill Process: $dest"
+fi
 echo "File installation completed. No firewall action, Wazuh restart or Manager config change."
