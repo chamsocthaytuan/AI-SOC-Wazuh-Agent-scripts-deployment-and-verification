@@ -698,3 +698,43 @@ def test_nftables_chain_header_handle_does_not_shift_rule_position():
     state = backend.inspect(request())
     assert state["rule_positions"] == ["hook_priority:-100;chain_rule_position:2"]
     assert state["rule_present"] is False
+
+
+def test_inspect_accepts_nft_as_persisted_firewall_tool_alias():
+    """Backend in endpoint evidence is 'nft', not the CLI's 'nftables'."""
+    parsed = block.parse_request("add", [
+        "--plan-id", "plan-1", "--action-id", "action-1",
+        "--execution-id", EXECUTION_ID, "--target-ip", "203.0.113.25",
+        "--direction", "inbound", "--operation", "inspect", "--backend", "nft",
+    ])
+    assert parsed["backend"] == "nftables"
+    assert parsed["operation"] == "inspect"
+
+
+@pytest.mark.parametrize("installed", [False, True])
+def test_independent_block_ip_inspection_is_read_only_and_fails_closed(tmp_path, installed):
+    fake = FakeNft()
+    backend = block.NftablesBackend("nft", fake)
+    req = request()
+    if installed:
+        assert backend.apply(req)["rule_present"] is True
+    before_rules = json.dumps(fake.chains, sort_keys=True)
+    emitted = []
+    before_calls = len(fake.calls)
+    exit_code = block.execute_request(
+        req, backend, "inspect",
+        evidence_writer=lambda event: emitted.append(event) or True,
+        connection_inspector=lambda _ip: {},
+        lock_dir=str(tmp_path),
+    )
+    assert exit_code == (0 if installed else 1)
+    assert json.dumps(fake.chains, sort_keys=True) == before_rules
+    assert all(command[0] not in {"add", "insert", "delete", "flush", "replace"}
+               for command in fake.calls[before_calls:])
+    assert len(emitted) == 1
+    evidence = emitted[0]
+    assert evidence["event"]["type"] == "STATE_SNAPSHOT"
+    assert evidence["event"]["step"] == "independent_endpoint_inspection"
+    assert evidence["event"]["outcome"] == "observed"
+    assert evidence["event"]["exit_code"] == exit_code
+    assert evidence["post_state"]["rule_present"] is installed
