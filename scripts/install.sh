@@ -18,11 +18,11 @@ command -v bash >/dev/null && command -v python3 >/dev/null || {
   echo "Requires bash and Python 3" >&2
   exit 1
 }
-for f in block-ip.py isolate.sh ai_soc_evidence.py; do
+for f in block-ip.py isolate.sh ai_soc_evidence.py kill-process0; do
   [[ -f "$ROOT/active-response/$f" ]] || { echo "Missing source $f" >&2; exit 1; }
 done
 bash -n "$ROOT/active-response/isolate.sh"
-python3 - "$ROOT/active-response/block-ip.py" "$ROOT/active-response/ai_soc_evidence.py" <<'PY'
+python3 - "$ROOT/active-response/block-ip.py" "$ROOT/active-response/ai_soc_evidence.py" "$ROOT/active-response/kill-process0" <<'PY'
 import pathlib,sys
 for name in sys.argv[1:]:
     compile(pathlib.Path(name).read_bytes(),name,"exec")
@@ -32,6 +32,7 @@ echo "Mode: $MODE"
 echo "Source: $ROOT/active-response"
 echo "Destination: $DEST"
 echo "Evidence file: $EVIDENCE"
+echo "Legacy kill-process0: bundled for review but intentionally NOT installed (security hardening pending)"
 
 if [[ "$MODE" != "apply" ]]; then
   echo "No changes made. Use --apply only on an authorized Wazuh Agent."
