@@ -8,6 +8,7 @@ Endpoint-side Active Response scripts for [chamsocthaytuan/ai_soc](https://githu
 
 - `active-response/block-ip.py` — Linux Block IP, nftables/iptables backends, execution ownership, rollback and JSONL evidence.
 - `active-response/isolate.sh` — IPv4/IPv6 host isolation with a Manager TCP 1514 exception, persistent state, automatic TTL expiry and rollback.
+  Provides read-only `--inspect <execution_id>` for a fresh, separately invoked kernel/firewall snapshot; emits `STATE_SNAPSHOT` with `event.step=independent_endpoint_inspection`, and never reapplies isolation or renews TTL.
 - `active-response/ai_soc_evidence.py` — versioned, validated JSONL endpoint evidence writer.
 - `active-response/kill-process0` — **original deployed Kali script** (997 bytes, SHA-256 `5e9bc0e03b94584838dd97a64aab8906b168243c7bda2cf700803060cf24b3da`), preserved unchanged for audit; **never installed by this installer**.
 - `active-response/kill-process-safe.py` — hardened, default-deny, allowlisted Linux Kill Process requiring PIDFD-based signaling and post-signal observation.
@@ -76,6 +77,18 @@ The live Kali lab demonstrated:
 - `TTL_AUTO_EXPIRED`, `expired` persistent state, IPv4 and IPv6 isolation rules removed and Agent TCP 1514 restored/preserved after expiry.
 
 This was **a direct endpoint invocation**. The lab execution ID `956f5ab8-411c-48bc-a3aa-6de908bede93` was not a committed execution in the production Orchestrator DB, so it cannot establish an end-to-end Worker verdict.
+
+## Read-only isolation inspection (for tomorrow's lab)
+
+From the **Kali console only**, after an authorized isolate execution with a durable execution ID and while TTL is still active, run:
+
+```bash
+sudo bash /var/ossec/active-response/bin/isolate.sh --inspect <execution_id>
+```
+
+The command cannot install or renew firewall rules. It captures both IPv4 and IPv6 rules, requires the correct live Manager connection, current `boot_id`, matching active execution, unexpired TTL, and emits an independent follow-up `STATE_SNAPSHOT`. If the state is no longer active, its evidence carries `exit_code=1` and the command fails closed. The execution must be committed in the AI-SOC database for the worker to accept its event.
+
+The command can also be issued to the Wazuh Agent via the existing `!isolate.sh` custom Active Response route with `--inspect` in `parameters.extra_args`, scoped to one explicit agent. This is a **read-only** observation, not a replay of the original isolation action.
 
 ## Tests
 
