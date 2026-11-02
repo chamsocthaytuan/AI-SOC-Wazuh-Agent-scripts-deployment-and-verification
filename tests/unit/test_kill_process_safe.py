@@ -131,8 +131,8 @@ def test_missing_permission_or_unverified_termination_does_not_claim_success(mon
 
 
 def test_main_has_no_signal_without_approved_policy(tmp_path, monkeypatch):
-    monkeypatch.setattr(kill.LOG_PATH.__class__, "__str__", Path.__str__, raising=False) if False else None
-    monkeypatch.setattr(kill, "LOG_PATH", tmp_path / "kill-process.log")
+    events = []
+    monkeypatch.setattr(kill, "audit", lambda status, name="-", pid="-": events.append((status,name,pid)))
     monkeypatch.setattr(kill.os, "geteuid", lambda: 0)
     monkeypatch.setattr(kill, "load_policy", lambda: frozenset({"safeother"}))
     monkeypatch.setattr(kill.sys, "stdin", io.StringIO(payload("aisockill2") + "\n"))
@@ -140,7 +140,7 @@ def test_main_has_no_signal_without_approved_policy(tmp_path, monkeypatch):
     monkeypatch.setattr(kill.signal, "pidfd_send_signal", lambda *args: signal_calls.append(args), raising=False)
     assert kill.main([]) == 1
     assert signal_calls == []
-    assert "NOT_ALLOWLISTED" in kill.LOG_PATH.read_text()
+    assert events == [("NOT_ALLOWLISTED", "aisockill2", "-")]
 
 
 def test_main_fake_process_sends_term_once_and_audits_verified(tmp_path, monkeypatch):
@@ -148,7 +148,8 @@ def test_main_fake_process_sends_term_once_and_audits_verified(tmp_path, monkeyp
     proc.mkdir()
     _create_process(proc, 412451, "aisockill2", start=321)
     monkeypatch.setattr(kill, "PROC_ROOT", proc)
-    monkeypatch.setattr(kill, "LOG_PATH", tmp_path / "kill-process.log")
+    events = []
+    monkeypatch.setattr(kill, "audit", lambda status, name="-", pid="-": events.append((status,name,pid)))
     monkeypatch.setattr(kill.os, "geteuid", lambda: 0)
     monkeypatch.setattr(kill, "load_policy", lambda: frozenset({"aisockill2"}))
     monkeypatch.setattr(kill.sys, "stdin", io.StringIO(payload("aisockill2") + "\n"))
@@ -157,11 +158,14 @@ def test_main_fake_process_sends_term_once_and_audits_verified(tmp_path, monkeyp
         _create_process(proc, 412451, "aisockill2", start=321, state="Z")
     monkeypatch.setattr(kill.signal, "pidfd_send_signal", fake_sig)
     assert kill.main([]) == 0
-    records = [json.loads(line) for line in kill.LOG_PATH.read_text().splitlines()]
-    assert [e["status"] for e in records] == [
-        "APPROVED", "SIGTERM_SENT", "TERMINATED_VERIFIED"
-    ]
-    assert all(e["pid"] == 412451 for e in records)
+    assert [e[0] for e in events] == ["APPROVED", "SIGTERM_SENT", "TERMINATED_VERIFIED"]
+    assert all(e[2] == 412451 for e in events)
+
+
+def test_audit_log_refuses_non_root_owner(tmp_path, monkeypatch):
+    monkeypatch.setattr(kill, "LOG_PATH", tmp_path / "untrusted.log")
+    with pytest.raises(kill.KillError, match="UNSAFE_AUDIT_LOG"):
+        kill.audit("APPROVED", "aisockill2", 412451)
 
 
 def test_kill_process_must_be_explicit_opt_in():
