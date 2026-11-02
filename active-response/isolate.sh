@@ -138,7 +138,7 @@ try:
     i=0
     while i < len(extra):
         item=extra[i]
-        if item in ("--rollback", "--renew", "--check-boot"):
+        if item in ("--rollback", "--renew", "--check-boot", "--inspect"):
             mode=item[2:]
             i += 1
         elif item.startswith("--") and "=" in item:
@@ -831,6 +831,49 @@ PY
     log_message "Host isolated; Manager ${WAZUH_MANAGER_IP}:${WAZUH_MANAGER_PORT} preserved; TTL ${ttl}s; execution ${execution_id}."
 }
 
+inspect_execution() {
+    # Read-only new-process snapshot: never apply/rollback, start a timer or renew TTL.
+    local execution_id="${1:-}" current_boot post_state exit_code=1
+    [[ -n "$execution_id" ]] || { fail "inspect requires execution_id"; return 2; }
+    require_root_and_tools || return 1
+    validate_manager_settings || return 1
+    acquire_lock || return 1
+    read_state_context "$execution_id" || { fail "unknown isolation execution_id for inspection"; return 1; }
+    current_boot="$(get_boot_id)" || return 1
+    post_state="$(capture_state)" || { fail "inspection snapshot unavailable"; return 1; }
+    # A stale ACTIVE marker or expired TTL must never certify a live isolation.
+    if [[ "$STATE_STATUS" == "active" && "$STATE_BOOT_ID" == "$current_boot" \
+          && -r "$ACTIVE_FILE" && "$(cat "$ACTIVE_FILE")" == "$execution_id" ]] \
+          && python3 - "$STATE_EXPIRES" <<'PY'
+import datetime,sys
+try:
+    dt = datetime.datetime.fromisoformat(sys.argv[1].replace("Z", "+00:00"))
+    if dt.tzinfo is None or dt <= datetime.datetime.now(datetime.timezone.utc):
+        raise SystemExit(1)
+except (TypeError,ValueError):
+    raise SystemExit(1)
+PY
+    then
+        if verify_firewall_active "$post_state" "$STATE_PRE"; then
+            exit_code=0
+        fi
+    fi
+    # Observed snapshot remains evidence of the current condition even when
+    # isolation was lost. A nonzero exit_code never certifies active isolation.
+    emit_evidence "STATE_SNAPSHOT" "independent_endpoint_inspection" "observed" "$exit_code" \
+        "$STATE_EXECUTION_ID" "$STATE_PLAN_ID" "$STATE_ACTION_ID" \
+        "$STATE_TARGET" "$STATE_TTL" "$post_state" "$STATE_PRE" "$post_state" || {
+        fail "independent inspection evidence write failed"
+        return 1
+    }
+    if (( exit_code != 0 )); then
+        fail "independent inspection did not confirm active isolation"
+        return 1
+    fi
+    log_message "Read-only independent inspection verified active isolation ${execution_id}."
+    return 0
+}
+
 rollback_execution() {
     local execution_id="${1:-}"
     require_firewall_tools || return 1
@@ -977,6 +1020,11 @@ main() {
             renew_execution "$execution_id" "$ttl"
             return $?
             ;;
+        --inspect)
+            [[ $# -eq 2 ]] || { fail "usage: isolate.sh --inspect <execution_id>"; return 2; }
+            inspect_execution "$2"
+            return $?
+            ;;
         --expire-now)
             [[ $# -eq 3 ]] || { fail "usage: isolate.sh --expire-now <execution_id> <generation>"; return 2; }
             expire_execution "$2" "$3"
@@ -1004,6 +1052,7 @@ main() {
     case "$mode" in
         rollback) rollback_execution "$execution_id" ;;
         renew) renew_execution "$execution_id" "$ttl" ;;
+        inspect) inspect_execution "$execution_id" ;;
         check-boot) check_boot_transition ;;
         *)
             case "$command_name" in
