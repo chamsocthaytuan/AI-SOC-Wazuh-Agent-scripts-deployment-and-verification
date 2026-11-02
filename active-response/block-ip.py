@@ -180,7 +180,7 @@ def build_argument_parser() -> argparse.ArgumentParser:
     parser.add_argument("--operation", choices=("apply", "rollback", "inspect"), default=None)
     parser.add_argument(
         "--backend",
-        choices=("auto", "nftables", "iptables", "iptables-nft", "iptables-legacy"),
+        choices=("auto", "nft", "nftables", "iptables", "iptables-nft", "iptables-legacy"),
         default="auto",
     )
     return parser
@@ -192,9 +192,12 @@ def parse_request(command: str, extra_args: Sequence[str]) -> Dict[str, Any]:
     except SystemExit as exc:
         raise BlockIPError("missing or invalid Block IP Active Response arguments") from exc
     operation = args.operation or ("rollback" if command == "delete" else "apply")
+    # Endpoint evidence records firewall_tool="nft"; accept that persisted
+    # value while retaining the canonical CLI backend selector internally.
+    backend = "nftables" if args.backend == "nft" else args.backend
     if command == "delete" and operation != "rollback":
         raise BlockIPError("Wazuh delete command can only perform rollback")
-    if operation in {"rollback", "inspect"} and args.backend not in {
+    if operation in {"rollback", "inspect"} and backend not in {
         "nftables", "iptables-nft", "iptables-legacy"
     }:
         raise BlockIPError(
@@ -218,7 +221,7 @@ def parse_request(command: str, extra_args: Sequence[str]) -> Dict[str, Any]:
         "ip_version": target_ip.version,
         "direction": normalize_direction(args.direction),
         "operation": operation,
-        "backend": args.backend,
+        "backend": backend,
     }
 
 
@@ -1017,12 +1020,14 @@ def _execute_request_locked(
 
     if operation == "inspect":
         state = {**backend.inspect(request), "existing_connections": pre_connections}
+        confirmed = state.get("rule_present") is True
+        exit_code = 0 if confirmed else 1
         _try_emit_evidence(evidence_writer, make_evidence_event(
-            request, "STATE_SNAPSHOT", "independent_endpoint_inspection", "observed", 0,
+            request, "STATE_SNAPSHOT", "independent_endpoint_inspection", "observed", exit_code,
             state, pre_state, state, backend,
         ))
-        print(json.dumps({"success": bool(state.get("rule_present")), "execution_id": request["execution_id"], "state": state}, sort_keys=True))
-        return 0
+        print(json.dumps({"success": confirmed, "execution_id": request["execution_id"], "state": state}, sort_keys=True))
+        return exit_code
 
     raise BlockIPError("unsupported operation {}".format(operation))
 
