@@ -6,6 +6,7 @@ Existing Wazuh identities/keys are never replaced.
 """
 import argparse
 import getpass
+import grp
 import ipaddress
 import json
 import os
@@ -124,10 +125,12 @@ def save_secret(password):
         fail("authd.pass already exists; refusing to replace existing credential")
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), 0o600)
     with os.fdopen(fd, "w", encoding="utf-8") as f:
+        os.fchown(f.fileno(), 0, grp.getgrnam("wazuh").gr_gid)
+        os.fchmod(f.fileno(), 0o640)
         f.write(password + "\n")
         f.flush()
         os.fsync(f.fileno())
-    print("AUTHD_PASSWORD_SAVED: restricted root-only file (not printed)")
+    print("AUTHD_PASSWORD_SAVED: root:wazuh 0640 (password not printed)")
 
 def setup_repo():
     if not shutil.which("apt-get"):
@@ -316,6 +319,13 @@ def main():
     ip = ensure_agent(args)
     setup_suricata(ip)
     setup_wazuh_localfile()
+    # Enrollment is asynchronous; wait briefly for a real client.keys rather
+    # than assuming systemctl 'active' means Agent enrollment succeeded.
+    if not enrolled():
+        for _ in range(30):
+            if enrolled():
+                break
+            time.sleep(1)
     verify()
     print("PREPARE_OK: ready to install Active Response scripts (no defense dispatched)")
 
