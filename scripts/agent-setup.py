@@ -195,7 +195,8 @@ def ensure_agent(args):
             if not port_open(ip, 1515):
                 fail("Manager enrollment TCP 1515 unreachable at " + ip)
             save_secret(new_enrollment_password())
-            run("systemctl", "enable", "--now", "wazuh-agent")
+            run("systemctl", "enable", "wazuh-agent")
+            run("systemctl", "restart", "wazuh-agent")
             print("ENROLLMENT_STARTED: existing unregistered Agent")
         else:
             print("AGENT_EXISTS: client.keys preserved, Manager=" + ip)
