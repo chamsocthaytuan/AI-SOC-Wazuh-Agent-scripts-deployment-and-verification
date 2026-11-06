@@ -8,12 +8,19 @@ POLICY=/var/ossec/etc/ai-soc/kill-process-policy.json
 MODE=preview
 KILL=0
 ALLOW=''
+MANAGER_IP=''
+AGENT_NAME=''
+REPOINT=0
 
 usage() {
   cat <<'HELP'
 Usage: bash scripts/install-oneclick.sh [--dry-run|--apply|--verify]
+                                        [--manager-ip IP] [--agent-name NAME] [--repoint-existing]
                                         [--with-kill-process [--allow-process NAME]]
   --dry-run            Preview without changing the Agent (default).
+  --manager-ip IP       Manager IPv4 (new Agent defaults to 10.0.70.12).
+  --agent-name NAME     Agent name to register (new Agent only).
+  --repoint-existing    Explicitly update existing Manager IP while preserving keys.
   --apply              Install Block IP, Isolate Host and JSONL evidence writer.
   --verify             Compare installed files and permissions to repository.
   --with-kill-process  Additionally install hardened kill-process0 (opt-in).
@@ -30,6 +37,11 @@ while (($#)); do
     --apply) MODE=apply ;;
     --verify) MODE=verify ;;
     --with-kill-process) KILL=1 ;;
+    --manager-ip) (($# > 1)) || fail 'Missing Manager IP'; MANAGER_IP="$2"; shift ;;
+    --manager-ip=*) MANAGER_IP="${1#*=}" ;;
+    --agent-name) (($# > 1)) || fail 'Missing Agent Name'; AGENT_NAME="$2"; shift ;;
+    --agent-name=*) AGENT_NAME="${1#*=}" ;;
+    --repoint-existing) REPOINT=1 ;;
     --allow-process) (($# > 1)) || fail 'Missing process name'; ALLOW="$2"; shift ;;
     *) usage >&2; printf 'Unknown argument: %s\n' "$1" >&2; exit 2 ;;
   esac
@@ -40,6 +52,15 @@ done
 [[ -z "$ALLOW" || "$KILL" == 1 ]] || fail '--allow-process is only valid together with --with-kill-process'
 bash -n "$ROOT/scripts/install.sh"
 bash -n "$ROOT/active-response/isolate.sh"
+[[ -f "$ROOT/scripts/agent-setup.py" ]] || fail 'Missing Wazuh + mandatory Suricata bootstrap'
+python3 - "$ROOT/scripts/agent-setup.py" <<'PY'
+import pathlib,sys
+compile(pathlib.Path(sys.argv[1]).read_bytes(),sys.argv[1],'exec')
+PY
+SETUP_OPTS=()
+[[ -z "$MANAGER_IP" ]] || SETUP_OPTS+=(--manager-ip "$MANAGER_IP")
+[[ -z "$AGENT_NAME" ]] || SETUP_OPTS+=(--agent-name "$AGENT_NAME")
+(( REPOINT == 0 )) || SETUP_OPTS+=(--repoint-existing)
 
 validate_name() {
   [[ -z "$ALLOW" ]] && return 0
@@ -99,8 +120,13 @@ print('Created lab allowlist policy:',sys.argv[1])
 PY
 }
 validate_name
-if [[ "$MODE" == verify ]]; then verify_install; exit 0; fi
+if [[ "$MODE" == verify ]]; then
+  python3 "$ROOT/scripts/agent-setup.py" --verify
+  verify_install
+  exit 0
+fi
 if [[ "$MODE" == preview ]]; then
+  python3 "$ROOT/scripts/agent-setup.py" --dry-run "${SETUP_OPTS[@]}"
   if ((KILL)); then
     bash "$ROOT/scripts/install.sh" --dry-run --with-kill-process
     [[ -z "$ALLOW" ]] || echo "Would create allowlist for lab process: $ALLOW"
@@ -111,12 +137,16 @@ if [[ "$MODE" == preview ]]; then
   exit 0
 fi
 root_only
+# Never reconfigure networking while AI-SOC isolation is active.
+[[ ! -e /var/lib/ai-soc-isolation/active_execution ]] || fail 'Active isolation detected; refusing bootstrap'
+python3 "$ROOT/scripts/agent-setup.py" --apply "${SETUP_OPTS[@]}"
 if ((KILL)); then
   create_policy
   bash "$ROOT/scripts/install.sh" --apply --with-kill-process
 else
   bash "$ROOT/scripts/install.sh" --apply
 fi
+python3 "$ROOT/scripts/agent-setup.py" --verify
 verify_install
 echo 'INSTALL_OK: Agent scripts installed; no AR command dispatched.'
 echo 'Manager command registration and ai-soc-linux JSONL collection are separate.'
