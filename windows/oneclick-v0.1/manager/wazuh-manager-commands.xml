@@ -1,0 +1,20 @@
+<!-- Wazuh Manager ossec.conf additions: command registration ONLY.
+     Deliberately no <active-response> automatic rules. Names are separate
+     from existing Linux commands and are for explicit-agent use only.
+     Stateless: timeout_allowed=no; isolation uses its own local 15m timer.
+     Insert three <command> elements inside the Manager's <ossec_config>. -->
+<command>
+  <name>ai-soc-win-block-ip</name>
+  <executable>block-ip-win.cmd</executable>
+  <timeout_allowed>no</timeout_allowed>
+</command>
+<command>
+  <name>ai-soc-win-isolate</name>
+  <executable>isolate-host.cmd</executable>
+  <timeout_allowed>no</timeout_allowed>
+</command>
+<command>
+  <name>ai-soc-win-kill-process</name>
+  <executable>kill-process-win.cmd</executable>
+  <timeout_allowed>no</timeout_allowed>
+</command>
