@@ -16,6 +16,12 @@ Endpoint-side Active Response scripts for [chamsocthaytuan/ai_soc](https://githu
 - `scripts/install.sh` — explicit `--apply` agent file installer; defaults to dry-run. It does not change Wazuh configuration or firewall state.
 - `tests/unit/` — non-destructive tests, including original endpoint tests ported from AI-SOC.
 
+## OneClick installer (Linux Agent)
+
+On an authorized Wazuh Linux Agent, preview with `bash scripts/install-oneclick.sh --dry-run`, install the standard Block IP / Isolate Host / JSONL evidence files with `sudo bash scripts/install-oneclick.sh --apply`, then verify using `sudo bash scripts/install-oneclick.sh --verify`.
+
+Opt-in hardened Kill Process requires a pre-approved root-owned policy or `--with-kill-process --allow-process <lab-process-name>` to create a new single-process lab allowlist. The installer does **not** configure the Manager or enable Active Response. See [Linux OneClick guide](docs/linux-oneclick.md).
+
 ## Compatibility and deployment
 
 Linux and Wazuh Agent, Python 3, `bash`, `flock`, `ss`, `iptables`/`ip6tables`, `iptables-save`/`ip6tables-save`, `systemd-run` and `systemctl`. Block IP additionally supports native nftables or explicit iptables variants.
