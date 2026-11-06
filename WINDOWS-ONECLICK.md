@@ -1,5 +1,7 @@
 # Windows Agent Active Response — OneClick v0.1 (lab)
 
+**Máy Windows mới chưa có Wazuh Agent/Suricata?** Xem [hướng dẫn cài đặt từ đầu (Windows, tiếng Việt)](docs/FRESH_WINDOWS_AGENT_WAZUH_SURICATA_ONECLICK.md).
+
 - [Download ZIP](windows/oneclick-v0.1/AI-SOC-Windows-AR-OneClick-v0.1.zip)
 - [Installer source and documentation](windows/oneclick-v0.1/README.md)
 
