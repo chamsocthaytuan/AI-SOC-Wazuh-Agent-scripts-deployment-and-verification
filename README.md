@@ -16,6 +16,10 @@ Endpoint-side Active Response scripts for [chamsocthaytuan/ai_soc](https://githu
 - `scripts/install.sh` — explicit `--apply` agent file installer; defaults to dry-run. It does not change Wazuh configuration or firewall state.
 - `tests/unit/` — non-destructive tests, including original endpoint tests ported from AI-SOC.
 
+## Cài đặt từ máy Linux mới (chưa có Wazuh Agent/Suricata)
+
+Xem [hướng dẫn từ đầu: Wazuh Agent 4.x + Suricata + OneClick + Manager evidence](docs/FRESH_LINUX_AGENT_WAZUH_SURICATA_ONECLICK.md) (tiếng Việt, triển khai lab single-server). **Không cài Agent mới đè lên một Agent đã đăng ký**.
+
 ## OneClick installer (Linux Agent)
 
 On an authorized Wazuh Linux Agent, preview with `bash scripts/install-oneclick.sh --dry-run`, install the standard Block IP / Isolate Host / JSONL evidence files with `sudo bash scripts/install-oneclick.sh --apply`, then verify using `sudo bash scripts/install-oneclick.sh --verify`.
