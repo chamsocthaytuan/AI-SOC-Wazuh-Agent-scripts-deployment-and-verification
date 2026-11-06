@@ -20,7 +20,13 @@ Endpoint-side Active Response scripts for [chamsocthaytuan/ai_soc](https://githu
 
 Xem [hướng dẫn từ đầu: Wazuh Agent 4.x + Suricata + OneClick + Manager evidence](docs/FRESH_LINUX_AGENT_WAZUH_SURICATA_ONECLICK.md) (tiếng Việt, triển khai lab single-server). **Không cài Agent mới đè lên một Agent đã đăng ký**.
 
-## OneClick installer (Linux Agent)
+## OneClick installer (Linux Agent) — v0.2
+
+**New:** `sudo bash scripts/install-oneclick.sh --apply --manager-ip 10.0.70.12` installs Wazuh Agent 4.8.2 if absent (name/password enrollment prompt), requires and provisions Suricata with EVE JSON, idempotently updates Agent `ossec.conf`, then installs Active Response scripts. On enrolled agents, identity and keys are preserved. Run `bash scripts/install-oneclick.sh --dry-run` first and `sudo bash scripts/install-oneclick.sh --verify` after. See [v0.2 runbook](docs/linux-oneclick.md).
+
+### Original endpoint-only commands (advanced)
+
+
 
 On an authorized Wazuh Linux Agent, preview with `bash scripts/install-oneclick.sh --dry-run`, install the standard Block IP / Isolate Host / JSONL evidence files with `sudo bash scripts/install-oneclick.sh --apply`, then verify using `sudo bash scripts/install-oneclick.sh --verify`.
 
@@ -39,7 +45,7 @@ Before deployment, back up and review the existing Agent install. The installer 
 
 **Required external integration:** in the AI-SOC Manager, register `isolate.sh` and `block-ip.py` as explicit-agent custom Active Response commands; configure the dedicated `ai-soc-linux` group `agent.conf` JSON localfile and rule 119910 / Indexer ingestion. Do not configure a broad/unfiltered automatic isolation trigger. The exact command registration and evidence routing must match the main AI-SOC deployment.
 
-**Manager IP:** `isolate.sh` is currently a lab-specific script with default Manager IP `192.168.100.192`. The script checks the actual Wazuh `client/server` address, port and TCP protocol, and fails closed when mismatched. **Do not deploy this version at a different Manager IP without explicitly configuring and validating `AI_SOC_WAZUH_MANAGER_IP` in the Active Response process environment or updating the packaged script via a reviewed deployment configuration.** Setting it in a manual shell alone does not guarantee Wazuh Active Response inherits it.
+**Manager IP (v0.2):** `isolate.sh` now reads the **actual Agent `ossec.conf`** instead of hardcoding the old lab IP. For a new Agent, OneClick defaults to Lab Server `10.0.70.12`. For an existing Agent, its enrolled Manager is preserved; changing it requires `--repoint-existing --manager-ip 10.0.70.12`. Only one literal IPv4/TCP 1514 Manager is accepted for isolation; no DNS fallback.
 
 ## Kill Process — preserved legacy and opt-in hardening
 
