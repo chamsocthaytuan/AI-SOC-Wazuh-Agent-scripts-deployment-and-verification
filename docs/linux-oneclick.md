@@ -1,3 +1,29 @@
+# AI-SOC Linux Agent — OneClick v0.2
+
+**Bản mới:** `scripts/install-oneclick.sh` hiện tự xử lý Wazuh Agent 4.8.2 (nếu chưa có), bắt buộc Suricata, cấu hình Wazuh thu `/var/log/suricata/eve.json` và cài Active Response. Chạy tại **máy Agent** Kali/Ubuntu/Debian, không chạy trên Lab Server.
+
+## Thao tác đề xuất
+
+```bash
+cd ~/AI-SOC-Wazuh-Agent-scripts-deployment-and-verification
+git fetch origin script-linux && git switch script-linux && git pull --ff-only
+bash scripts/install-oneclick.sh --dry-run --manager-ip 10.0.70.12
+sudo bash scripts/install-oneclick.sh --apply --manager-ip 10.0.70.12
+sudo bash scripts/install-oneclick.sh --verify
+```
+
+- **Agent mới:** nhập Agent Name qua prompt (hoặc `--agent-name Ubuntu-Lab-01`) và nhập mật khẩu enrollment **ẩn**. Mật khẩu không đưa vào CLI/log, lưu thành `/var/ossec/etc/authd.pass` với quyền `root:wazuh 0640`. Enrollment dùng TCP 1515; truyền log TCP 1514. Agent mới được pin bản **4.8.2-1** cho Manager lab 4.8.2.
+- **Agent đã đăng ký:** giữ nguyên `client.keys`, Agent ID/name và key; không đòi mật khẩu. Nếu Agent vẫn trỏ IP cũ, phải chọn rõ `--repoint-existing --manager-ip 10.0.70.12` trước khi áp dụng. Script sẽ sao lưu file cấu hình.
+- **Suricata:** bắt buộc; nếu thiếu thì cài từ APT, cập nhật ruleset, lấy HOME_NET và interface khi lần đầu cài, chạy test `suricata -T`, bật service, kiểm tra `eve.json`. Máy đã có Suricata thì không tự ghi đè YAML.
+- **ossec.conf:** chỉ thêm `<localfile>` dạng JSON khi chưa có, backup và kiểm tra XML, restart Agent khi thay đổi.
+- **Active Response:** chỉ sao chép scripts Block IP, Isolate và evidence writer; Kill Process mặc định vẫn opt-in/allowlist. Không thực thi firewall hoặc kill process, không bật auto-defense, không thay Manager rule.
+- **Giới hạn:** `INSTALL_OK` chứng tỏ cài file/Agent service/EVE/client key; không chứng minh event đã tới Indexer hoặc Verification V2 verdict. Kiểm tra Manager `agent_control -l`, evidence group `ai-soc-linux` và rule 119910 riêng.
+
+**Rollback:** tệp backup `*.bak.aisoc-*` được in ra lúc sửa cấu hình; files AR có bản `.bak-<stamp>` tại thư mục Agent. Không xóa evidence ledger.
+
+---
+
+
 # AI-SOC Linux Agent — OneClick v0.1
 
 Install from the repository root on an authorized Linux Wazuh Agent (not the Manager). Wazuh Agent and Linux firewall dependencies must already be installed.
