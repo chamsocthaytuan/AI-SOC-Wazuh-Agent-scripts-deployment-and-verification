@@ -11,7 +11,7 @@ FORWARD_CHAIN="AI_SOC_ISO_FWD"
 IP6_INPUT_CHAIN="AI_SOC_ISO6_IN"
 IP6_OUTPUT_CHAIN="AI_SOC_ISO6_OUT"
 IP6_FORWARD_CHAIN="AI_SOC_ISO6_FWD"
-WAZUH_MANAGER_IP="${AI_SOC_WAZUH_MANAGER_IP:-192.168.100.192}"
+WAZUH_MANAGER_IP="${AI_SOC_WAZUH_MANAGER_IP:-}"
 WAZUH_MANAGER_PORT="${AI_SOC_WAZUH_MANAGER_PORT:-1514}"
 ISOLATION_TIMEOUT_SECONDS="${AI_SOC_ISOLATION_TIMEOUT_SECONDS:-900}"
 MIN_TTL_SECONDS=60
@@ -22,6 +22,33 @@ ACTIVE_FILE="${STATE_DIR}/active_execution"
 LOCK_DIR="${AI_SOC_ISOLATE_RUN_DIR:-/run/ai-soc-isolation}"
 LOCK_FILE="${LOCK_DIR}/lock"
 AGENT_CONFIG="${AI_SOC_WAZUH_AGENT_CONFIG:-/var/ossec/etc/ossec.conf}"
+
+# When Active Response is run by Wazuh, shell environment variables are not reliable.
+# Read the actual enrolled Manager from the Agent config. Never fall back to an
+# old lab IP, a DNS hostname, or a second Manager during firewall isolation.
+if [[ -z "$WAZUH_MANAGER_IP" ]]; then
+    WAZUH_MANAGER_IP="$(python3 - "$AGENT_CONFIG" <<'PY'
+import ipaddress, pathlib, re, sys, xml.etree.ElementTree as ET
+try:
+    data = pathlib.Path(sys.argv[1]).read_text(encoding="utf-8-sig")
+    data = re.sub(r"^\s*<\?xml[^>]*\?>", "", data, count=1)
+    root = ET.fromstring("<bundle>" + data + "</bundle>")
+    servers = root.findall("./ossec_config/client/server")
+    if len(servers) != 1:
+        raise ValueError("expected exactly one Wazuh client/server")
+    server = servers[0]
+    host = (server.findtext("address") or "").strip()
+    port = (server.findtext("port") or "1514").strip()
+    protocol = (server.findtext("protocol") or "tcp").strip().lower()
+    if ipaddress.ip_address(host).version != 4 or port != "1514" or protocol != "tcp":
+        raise ValueError("require a literal IPv4 Manager on TCP 1514")
+    print(host)
+except (OSError, ValueError, ET.ParseError) as exc:
+    print("AI-SOC isolate: cannot safely resolve Wazuh Manager: " + str(exc), file=sys.stderr)
+    raise SystemExit(1)
+PY
+)" || exit 1
+fi
 BOOT_ID_FILE="${AI_SOC_BOOT_ID_FILE:-/proc/sys/kernel/random/boot_id}"
 EVIDENCE_WRITER="${AI_SOC_EVIDENCE_WRITER:-/var/ossec/active-response/bin/ai_soc_evidence.py}"
 LOG_FILE="${AI_SOC_ACTIVE_RESPONSE_LOG:-/var/ossec/logs/active-responses.log}"

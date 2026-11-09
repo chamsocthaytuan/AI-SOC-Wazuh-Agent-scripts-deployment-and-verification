@@ -65,22 +65,27 @@ if ip6tables-save | grep -qE 'AI_SOC_ISO6_(IN|OUT|FWD)'; then
   echo "Existing AI-SOC IPv6 isolation firewall state; refusing" >&2; exit 1
 fi
 
-# The current script has a lab-default Manager IP; never install silently
-# when the Wazuh Agent points at another Manager or uses DNS/UDP.
-python3 - /var/ossec/etc/ossec.conf "$ROOT/active-response/isolate.sh" <<'PY'
+# Require one static IPv4 Wazuh Manager at TCP 1514 so isolation can
+# preserve its real control channel. No hardcoded IP or silent DNS fallback.
+python3 - /var/ossec/etc/ossec.conf <<'PY'
 from pathlib import Path
-import re,sys,xml.etree.ElementTree as ET
-
+import ipaddress,re,sys,xml.etree.ElementTree as ET
 data=Path(sys.argv[1]).read_text(encoding="utf-8-sig")
 data=re.sub(r"^\s*<\?xml[^>]*\?>","",data,count=1)
 servers=ET.fromstring("<bundle>"+data+"</bundle>").findall("./ossec_config/client/server")
-actual=[((s.findtext("address") or "").strip(),
-         (s.findtext("port") or "1514").strip(),
-         (s.findtext("protocol") or "tcp").strip().lower()) for s in servers]
-script=Path(sys.argv[2]).read_text()
-match=re.search(r"AI_SOC_WAZUH_MANAGER_IP:-([0-9.]+)",script)
-if not match or actual != [(match.group(1),"1514","tcp")]:
-    raise SystemExit("Manager IP/protocol mismatch: review isolate.sh defaults before --apply")
+if len(servers) != 1:
+    raise SystemExit("Exactly one Wazuh Manager is required before --apply")
+s=servers[0]
+host=(s.findtext("address") or "").strip()
+port=(s.findtext("port") or "1514").strip()
+protocol=(s.findtext("protocol") or "tcp").strip().lower()
+try:
+    ip=ipaddress.ip_address(host)
+except ValueError:
+    raise SystemExit("Wazuh Manager must be a static IPv4 address (not DNS)")
+if ip.version != 4 or port != "1514" or protocol != "tcp":
+    raise SystemExit("Wazuh Manager must be one static IPv4 on TCP 1514")
+print("MANAGER_OK:",host)
 PY
 
 # Never replace a live kill-process0 with legacy code. The operator must
