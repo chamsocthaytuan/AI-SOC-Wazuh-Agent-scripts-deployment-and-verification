@@ -1,5 +1,6 @@
 """Non-destructive regression tests for Linux Agent + Suricata OneClick."""
 import importlib.util
+import os
 from pathlib import Path
 import subprocess
 import tempfile
@@ -67,3 +68,64 @@ def test_preview_does_not_touch_agent_or_prompt():
 
 def test_oneclick_bash_parses():
     subprocess.run(["bash", "-n", str(ROOT / "scripts" / "install-oneclick.sh")], check=True)
+
+
+def test_wazuh_apt_signing_key_readable_under_private_installer_umask(monkeypatch, tmp_path):
+    """A new public keyring/source must be readable by apt's sandboxed _apt user."""
+    key = tmp_path / "wazuh.gpg"
+    source = tmp_path / "wazuh.list"
+    monkeypatch.setattr(setup, "WAZUH_KEYRING", key)
+    monkeypatch.setattr(setup, "WAZUH_APT_SOURCE", source)
+    monkeypatch.setattr(setup.shutil, "which", lambda _: "/usr/bin/test-binary")
+    commands = []
+
+    def fake_run(*command, **kwargs):
+        commands.append(command)
+        if command[0] == "gpg":
+            Path(command[command.index("-o") + 1]).write_bytes(b"test-only-public-keyring")
+
+    monkeypatch.setattr(setup, "run", fake_run)
+    previous_umask = os.umask(0o077)
+    try:
+        setup.setup_repo()
+    finally:
+        os.umask(previous_umask)
+
+    assert key.is_file() and key.stat().st_mode & 0o777 == 0o644
+    assert source.is_file() and source.stat().st_mode & 0o777 == 0o644
+    assert "signed-by=/usr/share/keyrings/wazuh.gpg" in source.read_text()
+    assert commands[-1] == ("apt-get", "update")
+    assert any(command[0] == "gpg" for command in commands)
+
+
+def test_wazuh_apt_setup_repairs_partial_0600_files(monkeypatch, tmp_path):
+    """Interrupted attempts must not skip the keyring fix when wazuh.list exists."""
+    key = tmp_path / "wazuh.gpg"
+    source = tmp_path / "wazuh.list"
+    key.write_bytes(b"test-only-public-keyring")
+    source.write_text("deb [signed-by=/usr/share/keyrings/wazuh.gpg] https://packages.wazuh.com/4.x/apt/ stable main\n")
+    key.chmod(0o600)
+    source.chmod(0o600)
+    monkeypatch.setattr(setup, "WAZUH_KEYRING", key)
+    monkeypatch.setattr(setup, "WAZUH_APT_SOURCE", source)
+    monkeypatch.setattr(setup.shutil, "which", lambda _: "/usr/bin/test-binary")
+    commands = []
+    monkeypatch.setattr(setup, "run", lambda *args, **kwargs: commands.append(args))
+
+    setup.setup_repo()
+
+    assert key.stat().st_mode & 0o777 == 0o644
+    assert source.stat().st_mode & 0o777 == 0o644
+    assert commands == [("apt-get", "update")]
+
+
+def test_wazuh_apt_setup_rejects_symlink_keyring(monkeypatch, tmp_path):
+    key = tmp_path / "wazuh.gpg"
+    target = tmp_path / "target"
+    target.write_bytes(b"do-not-touch")
+    key.symlink_to(target)
+    monkeypatch.setattr(setup, "WAZUH_KEYRING", key)
+    monkeypatch.setattr(setup, "WAZUH_APT_SOURCE", tmp_path / "wazuh.list")
+    with pytest.raises(SystemExit, match="symlink"):
+        setup.setup_repo()
+    assert target.read_bytes() == b"do-not-touch"
