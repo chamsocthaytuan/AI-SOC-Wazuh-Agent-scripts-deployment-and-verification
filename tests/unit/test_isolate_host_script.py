@@ -90,7 +90,13 @@ def test_manager_whitelist_is_static_ipv4_tcp_1514_and_fail_closed():
     assert "Wazuh Agent must use only the configured static Manager IPv4/TCP address" in source
     assert '--sport "$WAZUH_MANAGER_PORT" -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT' in source
     assert '--dport "$WAZUH_MANAGER_PORT" -j ACCEPT' in source
-    assert 'AI_SOC_WAZUH_MANAGER_IP:-192.168.100.192' in source
+    # The static Manager IP is resolved from the enrolled Agent's ossec.conf;
+    # a hardcoded address from an old lab would strand the host on isolation.
+    assert 'WAZUH_MANAGER_IP="${AI_SOC_WAZUH_MANAGER_IP:-}"' in source
+    assert 'if [[ -z "$WAZUH_MANAGER_IP" ]]; then' in source
+    assert 'expected exactly one Wazuh client/server' in source
+    assert 'require a literal IPv4 Manager on TCP 1514' in source
+    assert 'AI_SOC_WAZUH_MANAGER_IP:-192.168.100.192' not in source
     assert 'AI_SOC_WAZUH_MANAGER_PORT:-1514' in source
 
 
