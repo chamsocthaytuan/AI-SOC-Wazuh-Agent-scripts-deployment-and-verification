@@ -13,6 +13,18 @@ param(
 $ErrorActionPreference='Stop'
 Set-StrictMode -Version 2.0
 function Fail([string]$text) { throw "SETUP_FAILED: $text" }
+function Test-PendingRestart {
+ $paths=@(
+  'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending',
+  'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired'
+ )
+ foreach($path in $paths) {
+  if(Test-Path -LiteralPath $path) { return $true }
+ }
+ $session=Get-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager' -Name PendingFileRenameOperations -ErrorAction SilentlyContinue
+ if($session -and $session.PendingFileRenameOperations) { return $true }
+ return $false
+}
 function AgentRoot {
  $candidates=@(
   (Join-Path ([Environment]::GetFolderPath('ProgramFilesX86')) 'ossec-agent'),
@@ -62,7 +74,9 @@ function EnsureAgent {
   $keys=Join-Path $root 'client.keys'
   if(-not(Test-Path $keys) -or (Get-Item $keys).Length -eq 0) {
    if(-not(Test-NetConnection $ManagerIP -Port 1515 -InformationLevel Quiet)) { Fail 'TCP 1515 enrollment unavailable' }
-   StorePassword $root
+   if(Test-Path -LiteralPath (Join-Path $root 'authd.pass')) {
+    Write-Host 'ENROLLMENT_PASSWORD_EXISTS: preserving saved credential for retry'
+   } else { StorePassword $root }
    Restart-Service WazuhSvc
    Write-Host 'ENROLLMENT_STARTED'
   } else { Write-Host 'AGENT_EXISTS: retained client.keys and Agent Name' }
@@ -72,6 +86,9 @@ function EnsureAgent {
  if($AgentName -cnotmatch '^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$') { Fail 'Invalid Agent Name' }
  if(-not(Test-NetConnection $ManagerIP -Port 1514 -InformationLevel Quiet) -or
     -not(Test-NetConnection $ManagerIP -Port 1515 -InformationLevel Quiet)) { Fail 'Manager TCP 1514/1515 unreachable' }
+ if(Get-Service -Name WazuhSvc -ErrorAction SilentlyContinue) {
+  Fail 'WazuhSvc is already registered but ossec.conf was not found. Inspect the existing/partial installation; refusing a blind MSI reinstall.'
+ }
  if(-not $WazuhMsiPath) {
   $WazuhMsiPath=Join-Path $env:TEMP 'wazuh-agent-4.8.2-1.msi'
   if(-not(Test-Path $WazuhMsiPath)) {
@@ -79,10 +96,26 @@ function EnsureAgent {
   }
  }
  if(-not(Test-Path $WazuhMsiPath)) { Fail 'Wazuh Agent 4.8.2 MSI unavailable' }
+ $logDir=Join-Path $env:ProgramData 'AI-SOC\InstallerLogs'
+ New-Item -ItemType Directory -Path $logDir -Force | Out-Null
+ $msiLog=Join-Path $logDir ('wazuh-agent-4.8.2-{0}.log' -f (Get-Date -Format 'yyyyMMdd-HHmmss'))
+ if(Test-PendingRestart) {
+  Write-Warning 'Windows reports a pending restart; some Wazuh MSI builds may reject installation. Do not clear pending-reboot registry keys manually.'
+ }
+ # The /L*v MSI log is required to diagnose generic 1603 errors.
+ # No enrollment password is passed on the MSI command line.
  $p=Start-Process msiexec.exe -ArgumentList @('/i',('"{0}"' -f $WazuhMsiPath),'/qn','/norestart',
   ('WAZUH_MANAGER="{0}"' -f $ManagerIP),('WAZUH_REGISTRATION_SERVER="{0}"' -f $ManagerIP),
-  ('WAZUH_AGENT_NAME="{0}"' -f $AgentName)) -Wait -PassThru
- if($p.ExitCode -ne 0) { Fail "Wazuh MSI exit $($p.ExitCode); 3010 requires reboot" }
+  ('WAZUH_AGENT_NAME="{0}"' -f $AgentName),'/L*v',('"{0}"' -f $msiLog)) -Wait -PassThru
+ Write-Host "WAZUH_MSI_EXIT: $($p.ExitCode)"
+ Write-Host "WAZUH_MSI_LOG: $msiLog"
+ switch ([int]$p.ExitCode) {
+  0 { }
+  3010 { throw "SETUP_PAUSED: Wazuh MSI succeeded but Windows requires a reboot (3010). Restart Windows, then run the OneClick installer again. MSI log: $msiLog" }
+  1603 { Fail "Wazuh MSI failed with 1603 (fatal installation error, NOT a reboot code). Inspect MSI log for 'Return value 3' and 'LaunchConditions'; do not uninstall or delete Agent keys blindly. Log: $msiLog" }
+  1618 { Fail "Another Windows Installer operation is running (1618). Finish that operation before retrying. Log: $msiLog" }
+  default { Fail "Wazuh MSI failed with exit code $($p.ExitCode). Inspect log: $msiLog" }
+ }
  $root=AgentRoot
  if(-not $root) { Fail 'Wazuh MSI returned success but Agent not detected' }
  Stop-Service WazuhSvc -ErrorAction SilentlyContinue
