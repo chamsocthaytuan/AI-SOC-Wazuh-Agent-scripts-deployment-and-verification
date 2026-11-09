@@ -19,12 +19,14 @@ sudo bash scripts/install-oneclick.sh --verify
 - **Active Response:** chỉ sao chép scripts Block IP, Isolate và evidence writer; Kill Process mặc định vẫn opt-in/allowlist. Không thực thi firewall hoặc kill process, không bật auto-defense, không thay Manager rule.
 - **Giới hạn:** `INSTALL_OK` chứng tỏ cài file/Agent service/EVE/client key; không chứng minh event đã tới Indexer hoặc Verification V2 verdict. Kiểm tra Manager `agent_control -l`, evidence group `ai-soc-linux` và rule 119910 riêng.
 
+**Khắc phục lỗi trên Kali (APT keyring permission denied):** bản sửa mới sẽ tự đặt file public `/usr/share/keyrings/wazuh.gpg` và `/etc/apt/sources.list.d/wazuh.list` về `0644` ngay cả khi lần cài trước đã tạo chúng ở `0600` rồi thất bại. Không thay mật khẩu enrollment và không bỏ qua xác minh chữ ký APT. Trên máy lỗi, chạy lại lệnh `git pull --ff-only origin script-linux && sudo bash scripts/install-oneclick.sh --apply --manager-ip 10.0.70.12` trong repo; nếu chưa cài Agent, script sẽ hỏi lại tên Agent và mật khẩu vì lần trước dừng trước bước đăng ký. Không cần xóa file repo/key thủ công.
+
 **Rollback:** tệp backup `*.bak.aisoc-*` được in ra lúc sửa cấu hình; files AR có bản `.bak-<stamp>` tại thư mục Agent. Không xóa evidence ledger.
 
 ---
 
 
-# AI-SOC Linux Agent — OneClick v0.1
+# AI-SOC Linux Agent — OneClick v0.1 (lưu trữ, đã được v0.2 thay thế)
 
 Install from the repository root on an authorized Linux Wazuh Agent (not the Manager). Wazuh Agent and Linux firewall dependencies must already be installed.
 
