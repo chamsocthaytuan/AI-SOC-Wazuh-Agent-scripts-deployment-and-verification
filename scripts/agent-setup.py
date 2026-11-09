@@ -26,6 +26,8 @@ EVE = Path("/var/log/suricata/eve.json")
 SURICATA = Path("/etc/suricata/suricata.yaml")
 VERSION = "4.8.2-1"
 DEFAULT_MANAGER = "10.0.70.12"
+WAZUH_APT_SOURCE = Path("/etc/apt/sources.list.d/wazuh.list")
+WAZUH_KEYRING = Path("/usr/share/keyrings/wazuh.gpg")
 
 def fail(message):
     raise SystemExit("SETUP_FAILED: " + message)
@@ -141,8 +143,8 @@ def setup_repo():
     """
     if not shutil.which("apt-get"):
         fail("Supported bootstrap OS: Ubuntu/Debian/Kali with apt")
-    source = Path("/etc/apt/sources.list.d/wazuh.list")
-    key = Path("/usr/share/keyrings/wazuh.gpg")
+    source = WAZUH_APT_SOURCE
+    key = WAZUH_KEYRING
     definition = "deb [signed-by=/usr/share/keyrings/wazuh.gpg] https://packages.wazuh.com/4.x/apt/ stable main\n"
 
     for path in (key, source):
