@@ -133,26 +133,54 @@ def save_secret(password):
     print("AUTHD_PASSWORD_SAVED: root:wazuh 0640 (password not printed)")
 
 def setup_repo():
+    """Install the public Wazuh APT key with permissions readable by _apt/sqv.
+
+    The OneClick wrapper runs with umask 077 to protect Agent credentials;
+    unlike secrets, signing keys and APT source definitions must be readable
+    by APT's unprivileged verifier. Also repair interrupted earlier installs.
+    """
     if not shutil.which("apt-get"):
         fail("Supported bootstrap OS: Ubuntu/Debian/Kali with apt")
-    if not shutil.which("gpg"):
-        run("apt-get", "update")
-        run("apt-get", "install", "-y", "ca-certificates", "gnupg")
     source = Path("/etc/apt/sources.list.d/wazuh.list")
     key = Path("/usr/share/keyrings/wazuh.gpg")
+    definition = "deb [signed-by=/usr/share/keyrings/wazuh.gpg] https://packages.wazuh.com/4.x/apt/ stable main\n"
+
+    for path in (key, source):
+        if path.is_symlink():
+            fail("Refusing symlink APT configuration: " + str(path))
+        if path.exists() and not path.is_file():
+            fail("Expected a regular APT configuration file: " + str(path))
+    if source.exists() and definition.strip() not in source.read_text().splitlines():
+        fail("Existing Wazuh APT source differs from expected; refusing overwrite")
+
+    # Repair a key/source already written with mode 0600 by an earlier attempt.
+    # Both files are public; enrollment passwords remain root-protected.
+    if key.exists():
+        key.chmod(0o644)
     if source.exists():
-        return
-    run("apt-get", "update")
-    run("apt-get", "install", "-y", "curl", "ca-certificates")
+        source.chmod(0o644)
+
     if not key.exists():
+        if not source.exists():
+            run("apt-get", "update")
+            run("apt-get", "install", "-y", "curl", "ca-certificates", "gnupg")
+        elif not (shutil.which("curl") and shutil.which("gpg")):
+            fail("Incomplete Wazuh APT setup: install curl and gnupg to restore its public key")
         fd, temp = tempfile.mkstemp(prefix="aisoc-wazuh-")
         os.close(fd)
         try:
             run("curl", "-fsSL", "https://packages.wazuh.com/key/GPG-KEY-WAZUH", "-o", temp)
             run("gpg", "--batch", "--yes", "--dearmor", "-o", str(key), temp)
+            if not key.is_file() or key.is_symlink() or key.stat().st_size == 0:
+                fail("Wazuh signing key was not created correctly")
+            key.chmod(0o644)
         finally:
             Path(temp).unlink(missing_ok=True)
-    source.write_text("deb [signed-by=/usr/share/keyrings/wazuh.gpg] https://packages.wazuh.com/4.x/apt/ stable main\n")
+
+    if not source.exists():
+        source.write_text(definition)
+        source.chmod(0o644)
+    # Do not bypass apt signature checks: fail if the public key is invalid.
     run("apt-get", "update")
 
 def install_new_agent(ip, name, password):
